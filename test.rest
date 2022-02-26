@@ -1,0 +1,18 @@
+POST http://localhost:3000/send-message
+content-type: application/json
+
+{
+    "number": "919023736282",
+    "sender": "test",
+    "message": "hi test 2"
+}
+
+###
+POST http://localhost:3000/send-media
+content-type: application/json
+
+{
+    "number": "919023736282",
+    "sender": "test",
+    "message": "hi test 3"
+}
