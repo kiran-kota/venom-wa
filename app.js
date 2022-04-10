@@ -7,6 +7,7 @@ const cors = require('cors');
 const venom = require('venom-bot');
 const qr = require('qrcode');
 const app = express();
+const axois = require('axios');
 
 app.use(express.static(__dirname + '/'));
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -19,7 +20,7 @@ app.use(cors());
 var server = http.createServer(app);    
 var io = socketIO(server);
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 80;
 
 let sessions = [];
 
@@ -34,29 +35,51 @@ app.post('/send-message', async (req, res)=>{
     const number = phoneNumberFormatter(req.body.number);
     const message = req.body.message;
     const sender = req.body.sender;
-    
+    const client = sessions.find(x=>x.id == sender).client;
+    if(client == undefined || client == null){
+        return res.status(422).json({message: 'client not found'});
+    }
+
     try {
-        const client = sessions.find(x=>x.id == sender).client;
-        const result = await client.sendText(number, message);
+        //await client.checkNumberStatus(number)
+        await client.sendText(number, message)
+        .then((result) => {
+            return res.status(200).json({status: true, message: 'message sent successfully'});
+        }).catch((erro) => {
+            return res.status(200).json({status: false, message: 'invalid  mob no'});
+        });
         return res.status(200).json({status: true, message: 'message sent successfully'});
     } catch (error) {
-        console.log(error);
-        return res.status(422).json(error);
+        //console.log('client is not available');
+        return res.status(422).json(error);      
     }
 
 });
 
 app.post('/send-media', async (req, res)=>{
     const number = phoneNumberFormatter(req.body.number);
+    const capton = req.body.caption;
     const message = req.body.message;
     const sender = req.body.sender;
     
     try {
-        const client = sessions.find(x=>x.id == sender).client;
-        const result = await client.sendFile(number,'./amar-plastics.pdf', 'poster', message);
+        const sclient = sessions.find(x=>x.id == sender);
+
+	    const client = sclient.client;
+        //const result = await client.sendFile(number,'./amar-plastics.pdf', 'poster', message);
+        let mimetype;
+
+        const attachment = await axois.get(req.body.file, {ResponseType: 'arraybuffer'}).then(response =>{
+            mimetype = response.headers['content-type'];
+            return response.data.toString['base64'];
+        });
+
+        const media = new MessageMedia(mimetype, attachment, 'Media');
+        await client.sendImageFromBase64(number, media, req.body.message);
+
         return res.status(200).json({status: true, message: 'message sent successfully'});
     } catch (error) {
-        console.log(error);
+        console.log('client not available');
         return res.status(422).json(error);
     }
 
@@ -65,7 +88,6 @@ app.post('/send-media', async (req, res)=>{
 
 io.on('connection', function(socket){
     socket.on('create-session', function(data){
-        console.log(data, 'data');
         io.emit('message', {id: data.id, text: 'loading...'});
         createSession(data.id);
     })
@@ -73,66 +95,82 @@ io.on('connection', function(socket){
 
 
 async function createSession(id) {
+    console.log(id, 'id');
     try {
-        const wa = await venom.create(
-            //session
-            id, //Pass the name of the client you want to start the bot
-            //catchQR
+        var client = await venom.create(
+            id, 
             (base64Qrimg, asciiQR, attempts, urlCode) => {
               console.log('Number of attempts to read the qrcode: ', attempts);
-              console.log('Terminal qrcode: ', asciiQR);
-              console.log('base64 image string qrcode: ', base64Qrimg);
-              console.log('urlCode (data-ref): ', urlCode);
               io.emit('qr', {id: id, url: base64Qrimg});
-              io.emit('message', {id: id, text: 'QR Code received, scan please!'});
-            //   qr.toDataURL(res, (err, url)=>{
-            //     io.emit('qr', {id: id, url: url});
-            //     io.emit('message', {id: id, text: 'QR Code received, scan please!'});
-            //   })
+              io.emit('message', {id: id, text: 'QR Code received, scan please!'});            
             },
-            // statusFind
             (statusSession, session) => {
-              console.log('Status Session: ', statusSession); //return isLogged || notLogged || browserClose || qrReadSuccess || qrReadFail || autocloseCalled || desconnectedMobile || deleteToken || chatsAvailable || deviceNotConnected || serverWssNotConnected || noOpenBrowser
-              //Create session wss return "serverClose" case server for close
+              console.log('Status Session: ', statusSession);
               console.log('Session name: ', session);
               io.emit('message', {id: id, text: statusSession});
               io.emit(statusSession, {id: session, text: statusSession})
+           
             },
-            // options
             {
-              multidevice: true, // for version not multidevice use false.(default: true)
-              folderNameToken: 'tokens', //folder name when saving tokens
-              mkdirFolderToken: '', //folder directory tokens, just inside the venom folder, example:  { mkdirFolderToken: '/node_modules', } //will save the tokens folder in the node_modules directory
-              headless: true, // Headless chrome
-              devtools: false, // Open devtools by default
-              useChrome: true, // If false will use Chromium instance
-              debug: false, // Opens a debug session
-              logQR: true, // Logs QR automatically in terminal
-              browserWS: '', // If u want to use browserWSEndpoint
-              browserArgs: [''], //Original parameters  ---Parameters to be added into the chrome browser instance
-              puppeteerOptions: {}, // Will be passed to puppeteer.launch
-              disableSpins: true, // Will disable Spinnies animation, useful for containers (docker) for a better log
-              disableWelcome: true, // Will disable the welcoming message which appears in the beginning
-              updatesLog: true, // Logs info updates automatically in terminal
-              autoClose: 60000, // Automatically closes the venom-bot only when scanning the QR code (default 60 seconds, if you want to turn it off, assign 0 or false)
-              createPathFileToken: true, // creates a folder when inserting an object in the client's browser, to work it is necessary to pass the parameters in the function create browserSessionToken
-              //chromiumVersion: '818858', // Version of the browser that will be used. Revision strings can be obtained from omahaproxy.appspot.com.
-              addProxy: [''], // Add proxy server exemple : [e1.p.webshare.io:01, e1.p.webshare.io:01]
-              userProxy: '', // Proxy login username
-              userPass: '' // Proxy password
-            },
-            // BrowserInstance
+              multidevice: true,
+              folderNameToken: 'tokens',
+              headless: false,
+              devtools: false,
+              useChrome: true,
+              debug: false,
+              logQR: false,
+              browserArgs: ['--no-sandbox', '--disable-setuid-sandbox'],
+              disableSpins: true, 
+              disableWelcome: true, 
+              updatesLog: true,
+              autoClose: 0,
+              createPathFileToken: true,
+              //chromiumVersion: '818858',
+              waitForLogin: true
+              },
             (browser, waPage) => {
               console.log('Browser PID:', browser.process().pid);
             }
           );
-        sessions = sessions.filter(x=>x.id != id);
-        sessions.push({id: id, client: wa});
+          if(client != null){
+            // let time = 0;
+            // client.onStreamChange((state) => {
+            //   console.log('State Connection Stream: ' + state);
+            //   clearTimeout(time);
+            //   if (state === 'DISCONNECTED' || state === 'SYNCING') {
+            //     time = setTimeout(() => {
+            //       client.close();
+            //     }, 80000);
+            //   }
+            // });
+            
+            sessions = sessions.filter(x=>x.id != id);
+            sessions.push({id: id, client: client});
+          }          
+
     } catch (error) {
-        console.log(error, 'error');      
-    }
+        console.log('session start error');      
+    } 
+
+    
 }
 
 
 
 server.listen(PORT, ()=>console.log('server started at ' + PORT));
+
+
+// const interval = setInterval(()=>{
+//     sessions.forEach(async (ele)=>{
+//         const id = ele.id;
+//         try {
+//             var conn = await ele.client.isConnected();
+//             var theme = await ele.client.getTheme();
+            
+//         } catch (error) {   
+//             await ele.client.close();        
+//             sessions = sessions.filter(x=>x.id != ele.id);
+//             await createSession(id);
+//         }
+//     });
+// }, 5000)
