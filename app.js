@@ -69,14 +69,15 @@ venom.create(
     waclient = client;   
     client.onStateChange(state => {
         console.log('State changed: ', state);
+        io.emit('message', {id: id, text: state});
         if(state == 'CONNECTED'){
             waclient = client;
-        }''
+        }
         // force whatsapp take over
         if ('CONFLICT'.includes(state)) client.useHere();
         // detect disconnect on whatsapp
         if ('UNPAIRED'.includes(state)) console.log('logout');
-        io.emit('message', {id: id, text: state});
+        
     });
     //start(client);
 }).catch((erro)=>{
@@ -102,6 +103,7 @@ app.post('/send-message', async (req, res)=>{
 
         //verify clinet is online
         if(waclient == null || waclient == undefined){
+            io.emit('message', {id: id, text: 'client not available'});
             return res.status(422).json({status: null, message: 'client not available'}); 
         }
 
@@ -110,6 +112,7 @@ app.post('/send-message', async (req, res)=>{
         //verify number
         const chat = await waclient?.checkNumberStatus(number).then((result) =>result).catch((err) => console.error(err, 'error'));
         if(chat == null || chat == undefined){
+            io.emit('message', {id: id, text: 'invalid mobile number ' + req.body.number});
             return res.status(200).json({status: false, message: 'invalid mobile number'});
         }
 
@@ -117,8 +120,10 @@ app.post('/send-message', async (req, res)=>{
         const report = await waclient.sendText(number, message).then((result) => result).catch((err) => console.error(err, 'error'));
  
         if(report == null || report == undefined){
+            io.emit('message', {id: id, text: 'faild to send message on ' + req.body.number});
             return res.status(422).json({status: null, message: 'something went wrong'}); 
         }
+        io.emit('message', {id: id, text: 'success on send message to ' + req.body.number});
         return res.status(200).json({status: true, message: 'message sent successfully'});
     } catch (error) {
         return res.status(422).json(error); 
@@ -136,6 +141,7 @@ app.post('/send-media', async (req, res)=>{
 
         //verify clinet is online
         if(waclient == null || waclient == undefined){
+            io.emit('message', {id: id, text: 'client not available'});
             return res.status(422).json({status: null, message: 'client not available'}); 
         }
 
@@ -144,6 +150,7 @@ app.post('/send-media', async (req, res)=>{
         //verify number
         const chat = await waclient?.checkNumberStatus(number).then((result) =>result).catch((err) => console.error(err, 'error'));
         if(chat == null || chat == undefined){
+            io.emit('message', {id: id, text: 'invalid mobile number ' + req.body.number});
             return res.status(200).json({status: false, message: 'invalid mobile number'});
         }
 
@@ -151,8 +158,10 @@ app.post('/send-media', async (req, res)=>{
         const report = await waclient.sendImageFromBase64(number, mimetype + file, message).then((result) => result).catch((err) => console.error(err, 'error'));
  
         if(report == null || report == undefined){
+            io.emit('message', {id: id, text: 'faild to send message on ' + req.body.number});
             return res.status(422).json({status: null, message: 'something went wrong'}); 
         }
+        io.emit('message', {id: id, text: 'success on send message to ' + req.body.number});
         return res.status(200).json({status: true, message: 'message sent successfully'});
     } catch (error) {
         return res.status(422).json(error); 
@@ -171,6 +180,7 @@ app.post('/send-file', async (req, res)=>{
         const mimetype = req.body.mimetype;
         //verify clinet is online
         if(waclient == null || waclient == undefined){
+            io.emit('message', {id: id, text: 'client not available'});
             return res.status(422).json({status: null, message: 'client not available'}); 
         }
 
@@ -179,6 +189,7 @@ app.post('/send-file', async (req, res)=>{
         //verify number
         const chat = await waclient?.checkNumberStatus(number).then((result) =>result).catch((err) => console.error(err, 'error'));
         if(chat == null || chat == undefined){
+            io.emit('message', {id: id, text: 'invalid mobile number ' + req.body.number});
             return res.status(200).json({status: false, message: 'invalid mobile number'});
         }
 
@@ -186,8 +197,10 @@ app.post('/send-file', async (req, res)=>{
         const report = await waclient.sendFileFromBase64(number, mimetype + file, filename, message).then((result) => result).catch((err) => console.error(err, 'error'));
  
         if(report == null || report == undefined){
+            io.emit('message', {id: id, text: 'faild to send message on ' + req.body.number});
             return res.status(422).json({status: null, message: 'something went wrong'}); 
         }
+        io.emit('message', {id: id, text: 'success on send message to ' + req.body.number});
         return res.status(200).json({status: true, message: 'message sent successfully'});
     } catch (error) {
         return res.status(422).json(error); 
@@ -204,6 +217,7 @@ app.post('/send-png', async (req, res)=>{
         
         //verify clinet is online
         if(waclient == null || waclient == undefined){
+            io.emit('message', {id: id, text: 'client not available'});
             return res.status(422).json({status: null, message: 'client not available'}); 
         }
 
@@ -212,6 +226,7 @@ app.post('/send-png', async (req, res)=>{
         //verify number
         const chat = await waclient?.checkNumberStatus(number).then((result) =>result).catch((err) => console.error(err, 'error'));
         if(chat == null || chat == undefined){
+            io.emit('message', {id: id, text: 'invalid mobile number ' + req.body.number});
             return res.status(200).json({status: false, message: 'invalid mobile number'});
         }
         var fileName = Date.now();
@@ -227,8 +242,10 @@ app.post('/send-png', async (req, res)=>{
         const report = await waclient.sendImage(number, `output/${fileName}.png`, req.body.filename, message).then((result) => result).catch((err) => console.error(err, 'error'));
  
         if(report == null || report == undefined){
+            io.emit('message', {id: id, text: 'faild to send message on ' + req.body.number});
             return res.status(422).json({status: null, message: 'something went wrong'}); 
         }
+        io.emit('message', {id: id, text: 'success on send message to ' + req.body.number});
         return res.status(200).json({status: true, message: 'message sent successfully'});
     } catch (error) {
         console.error(error, 'process error');
