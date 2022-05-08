@@ -5,13 +5,15 @@ const http = require('http');
 const socketIO = require('socket.io');
 const cors = require('cors');
 const venom = require('venom-bot');
-const qr = require('qrcode');
 const app = express();
-const axois = require('axios');
+
+const fs      = require('fs');
+const path    = require('path');
+const Pdf2Img = require('pdf2img-promises');
 
 app.use(express.static(__dirname + '/'));
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
+app.use(bodyParser.json({limit: '50mb'}));
+app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
 app.engine('html', require('ejs').renderFile);
 app.set('view engine', 'html');
 app.set('views', __dirname);
@@ -20,157 +22,230 @@ app.use(cors());
 var server = http.createServer(app);    
 var io = socketIO(server);
 
-const PORT = process.env.PORT || 80;
+const PORT = process.env.PORT || 3300;
 
-let sessions = [];
+
+let id = 'test';
+
+let waclient;
+
+venom.create(
+    id, 
+    (base64Qrimg, asciiQR, attempts, urlCode) => {
+        waclient = null;
+        console.log('Number of attempts to read the qrcode: ', attempts);
+        io.emit('qr', {id: id, url: base64Qrimg});
+        io.emit('message', {id: id, text: 'QR Code received, scan please!'});       
+        io.emit('message', {id: id, text: 'Number of attempts to read the qrcode: ' + attempts});        
+    },
+    (statusSession, session) => {
+        console.log('Status Session: ', statusSession);
+        console.log('Session name: ', session);
+        io.emit('message', {id: id, text: statusSession});
+        io.emit(statusSession, {id: session, text: statusSession})    
+    },
+    {
+    multidevice: true,
+    folderNameToken: 'tokens',
+    headless: true,
+    devtools: false,
+    useChrome: true,
+    debug: false,
+    logQR: false,
+    browserArgs: ['--no-sandbox', '--disable-setuid-sandbox'],
+    disableSpins: true, 
+    disableWelcome: true, 
+    updatesLog: true,
+    autoClose: 0,
+    createPathFileToken: true,
+    //chromiumVersion: '818858',
+    waitForLogin: true
+    },
+    (browser, waPage) => {
+        console.log('Browser PID:', browser.process().pid);
+        waPage.screenshot({ path: 'screenshot.png' });
+    }
+).then((client)=>{ 
+    waclient = client;   
+    client.onStateChange(state => {
+        console.log('State changed: ', state);
+        if(state == 'CONNECTED'){
+            waclient = client;
+        }''
+        // force whatsapp take over
+        if ('CONFLICT'.includes(state)) client.useHere();
+        // detect disconnect on whatsapp
+        if ('UNPAIRED'.includes(state)) console.log('logout');
+        io.emit('message', {id: id, text: state});
+    });
+    //start(client);
+}).catch((erro)=>{
+    console.log(erro);
+});
+
+
+
+
 
 app.get('/', (req, res)=>res.send('welcome'));
 
-app.get('/session/:id', (req, res)=>{
-    var id = req.params.id;
-    res.render('session.html', {id: id});
+app.get('/session', (req, res)=>{    
+    res.render('session.html');
 });
+
 
 app.post('/send-message', async (req, res)=>{
-    const number = phoneNumberFormatter(req.body.number);
-    const message = req.body.message;
-    const sender = req.body.sender;
-    const client = sessions.find(x=>x.id == sender).client;
-    if(client == undefined || client == null){
-        return res.status(422).json({message: 'client not found'});
-    }
-
     try {
-        //await client.checkNumberStatus(number)
-        await client.sendText(number, message)
-        .then((result) => {
-            return res.status(200).json({status: true, message: 'message sent successfully'});
-        }).catch((erro) => {
-            return res.status(200).json({status: false, message: 'invalid  mob no'});
-        });
+        const number = phoneNumberFormatter(req.body.number);
+        const message = req.body.message;
+        const sender = req.body.sender;
+
+        //verify clinet is online
+        if(waclient == null || waclient == undefined){
+            return res.status(422).json({status: null, message: 'client not available'}); 
+        }
+
+        // var status = await waclient.getConnectionState().then((result) =>result).catch((err) => console.error(err, 'error'));
+        // console.log(status, 'conn status');
+        //verify number
+        const chat = await waclient?.checkNumberStatus(number).then((result) =>result).catch((err) => console.error(err, 'error'));
+        if(chat == null || chat == undefined){
+            return res.status(200).json({status: false, message: 'invalid mobile number'});
+        }
+
+        //send message
+        const report = await waclient.sendText(number, message).then((result) => result).catch((err) => console.error(err, 'error'));
+ 
+        if(report == null || report == undefined){
+            return res.status(422).json({status: null, message: 'something went wrong'}); 
+        }
         return res.status(200).json({status: true, message: 'message sent successfully'});
     } catch (error) {
-        //console.log('client is not available');
-        return res.status(422).json(error);      
+        return res.status(422).json(error); 
     }
-
 });
 
+
 app.post('/send-media', async (req, res)=>{
-    const number = phoneNumberFormatter(req.body.number);
-    const capton = req.body.caption;
-    const message = req.body.message;
-    const sender = req.body.sender;
-    
     try {
-        const sclient = sessions.find(x=>x.id == sender);
+        const number = phoneNumberFormatter(req.body.number);
+        const message = req.body.message;
+        const sender = req.body.sender;
+        const file = req.body.file;
+        const mimetype = req.body.mimetype;
 
-	    const client = sclient.client;
-        //const result = await client.sendFile(number,'./amar-plastics.pdf', 'poster', message);
-        let mimetype;
+        //verify clinet is online
+        if(waclient == null || waclient == undefined){
+            return res.status(422).json({status: null, message: 'client not available'}); 
+        }
 
-        const attachment = await axois.get(req.body.file, {ResponseType: 'arraybuffer'}).then(response =>{
-            mimetype = response.headers['content-type'];
-            return response.data.toString['base64'];
-        });
+        // var status = await waclient.getConnectionState().then((result) =>result).catch((err) => console.error(err, 'error'));
+        // console.log(status, 'conn status');
+        //verify number
+        const chat = await waclient?.checkNumberStatus(number).then((result) =>result).catch((err) => console.error(err, 'error'));
+        if(chat == null || chat == undefined){
+            return res.status(200).json({status: false, message: 'invalid mobile number'});
+        }
 
-        const media = new MessageMedia(mimetype, attachment, 'Media');
-        await client.sendImageFromBase64(number, media, req.body.message);
-
+        //send message
+        const report = await waclient.sendImageFromBase64(number, mimetype + file, message).then((result) => result).catch((err) => console.error(err, 'error'));
+ 
+        if(report == null || report == undefined){
+            return res.status(422).json({status: null, message: 'something went wrong'}); 
+        }
         return res.status(200).json({status: true, message: 'message sent successfully'});
     } catch (error) {
-        console.log('client not available');
-        return res.status(422).json(error);
+        return res.status(422).json(error); 
     }
+});
 
+
+
+app.post('/send-file', async (req, res)=>{
+    try {
+        const number = phoneNumberFormatter(req.body.number);
+        const message = req.body.message;
+        const sender = req.body.sender;
+        const file = req.body.file;
+        const filename = req.body.filename;
+        const mimetype = req.body.mimetype;
+        //verify clinet is online
+        if(waclient == null || waclient == undefined){
+            return res.status(422).json({status: null, message: 'client not available'}); 
+        }
+
+        // var status = await waclient.getConnectionState().then((result) =>result).catch((err) => console.error(err, 'error'));
+        // console.log(status, 'conn status');
+        //verify number
+        const chat = await waclient?.checkNumberStatus(number).then((result) =>result).catch((err) => console.error(err, 'error'));
+        if(chat == null || chat == undefined){
+            return res.status(200).json({status: false, message: 'invalid mobile number'});
+        }
+
+        //send message
+        const report = await waclient.sendFileFromBase64(number, mimetype + file, filename, message).then((result) => result).catch((err) => console.error(err, 'error'));
+ 
+        if(report == null || report == undefined){
+            return res.status(422).json({status: null, message: 'something went wrong'}); 
+        }
+        return res.status(200).json({status: true, message: 'message sent successfully'});
+    } catch (error) {
+        return res.status(422).json(error); 
+    }
+});
+
+
+app.post('/send-png', async (req, res)=>{
+    try {
+        const number = phoneNumberFormatter(req.body.number);
+        const message = req.body.message;
+        const sender = req.body.sender;
+        const file = req.body.file;
+        
+        //verify clinet is online
+        if(waclient == null || waclient == undefined){
+            return res.status(422).json({status: null, message: 'client not available'}); 
+        }
+
+        // var status = await waclient.getConnectionState().then((result) =>result).catch((err) => console.error(err, 'error'));
+        // console.log(status, 'conn status');
+        //verify number
+        const chat = await waclient?.checkNumberStatus(number).then((result) =>result).catch((err) => console.error(err, 'error'));
+        if(chat == null || chat == undefined){
+            return res.status(200).json({status: false, message: 'invalid mobile number'});
+        }
+        var fileName = Date.now();
+        let converter = new Pdf2Img();
+        var buf = Buffer.from(file, 'base64');
+        var r = await converter.convertPdf2Img(buf, `output/${fileName}.png`, 1);
+        console.log(r, 'pdf status');
+        if(r == null || r == undefined){
+            return res.status(422).json({status: null, message: 'png convertion failed'}); 
+        }
+        
+        //send message
+        const report = await waclient.sendImage(number, `output/${fileName}.png`, req.body.filename, message).then((result) => result).catch((err) => console.error(err, 'error'));
+ 
+        if(report == null || report == undefined){
+            return res.status(422).json({status: null, message: 'something went wrong'}); 
+        }
+        return res.status(200).json({status: true, message: 'message sent successfully'});
+    } catch (error) {
+        console.error(error, 'process error');
+        return res.status(422).json(error); 
+    }
 });
 
 
 io.on('connection', function(socket){
     socket.on('create-session', function(data){
-        io.emit('message', {id: data.id, text: 'loading...'});
-        createSession(data.id);
+        io.emit('message', {id: id, text: 'loading...'});
+        if(waclient == null || waclient == undefined){
+            io.emit('message', {id: id, text: 'client is not available'});
+        }
+        io.emit('message', {id: id, text: 'please wait checking client status'});
     })
 })
 
 
-async function createSession(id) {
-    console.log(id, 'id');
-    try {
-        var client = await venom.create(
-            id, 
-            (base64Qrimg, asciiQR, attempts, urlCode) => {
-              console.log('Number of attempts to read the qrcode: ', attempts);
-              io.emit('qr', {id: id, url: base64Qrimg});
-              io.emit('message', {id: id, text: 'QR Code received, scan please!'});            
-            },
-            (statusSession, session) => {
-              console.log('Status Session: ', statusSession);
-              console.log('Session name: ', session);
-              io.emit('message', {id: id, text: statusSession});
-              io.emit(statusSession, {id: session, text: statusSession})
-           
-            },
-            {
-              multidevice: true,
-              folderNameToken: 'tokens',
-              headless: false,
-              devtools: false,
-              useChrome: true,
-              debug: false,
-              logQR: false,
-              browserArgs: ['--no-sandbox', '--disable-setuid-sandbox'],
-              disableSpins: true, 
-              disableWelcome: true, 
-              updatesLog: true,
-              autoClose: 0,
-              createPathFileToken: true,
-              //chromiumVersion: '818858',
-              waitForLogin: true
-              },
-            (browser, waPage) => {
-              console.log('Browser PID:', browser.process().pid);
-            }
-          );
-          if(client != null){
-            // let time = 0;
-            // client.onStreamChange((state) => {
-            //   console.log('State Connection Stream: ' + state);
-            //   clearTimeout(time);
-            //   if (state === 'DISCONNECTED' || state === 'SYNCING') {
-            //     time = setTimeout(() => {
-            //       client.close();
-            //     }, 80000);
-            //   }
-            // });
-            
-            sessions = sessions.filter(x=>x.id != id);
-            sessions.push({id: id, client: client});
-          }          
-
-    } catch (error) {
-        console.log('session start error');      
-    } 
-
-    
-}
-
-
-
 server.listen(PORT, ()=>console.log('server started at ' + PORT));
-
-
-// const interval = setInterval(()=>{
-//     sessions.forEach(async (ele)=>{
-//         const id = ele.id;
-//         try {
-//             var conn = await ele.client.isConnected();
-//             var theme = await ele.client.getTheme();
-            
-//         } catch (error) {   
-//             await ele.client.close();        
-//             sessions = sessions.filter(x=>x.id != ele.id);
-//             await createSession(id);
-//         }
-//     });
-// }, 5000)

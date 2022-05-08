@@ -16,8 +16,9 @@
     "ejs": "^3.1.6",
     "express": "^4.17.3",
     "http": "^0.0.1-security",
+    "pdf2img-promises": "^0.6.6",
     "qrcode": "^1.5.0",
     "socket.io": "^2.3.0",
-    "venom-bot": "^4.0.6"
+    "venom-bot": "^4.0.11"
   }
 }
