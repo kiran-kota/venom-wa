@@ -1,10 +1,10 @@
-POST http://localhost:3300/send-message
+POST http://18.212.93.249/send-message
 Content-Type: application/json
 
 {
-    "number": "917043051136",
+    "number": "919023736282",
     "sender": "test",
-    "message": "hi test case 3"
+    "message": "hi"
 }
 
 ###
@@ -17,9 +17,20 @@ Content-Type: application/json
     "message": "hi test case 23"
 }
 
+###
+POST http://localhost:3300/send-image-url
+Content-Type: application/json
+
+{
+    "number": "917043051136",
+    "sender": "test",
+    "message": "hi test case 23",
+    "file": "https://res.cloudinary.com/rough-commerce/image/upload/v1652261876/a8hnivhaz0i756tbgdnp.png",
+    "filename": "rates"
+}
 
 ###
-POST http://localhost:3300/send-png
+POST http://localhost:3300/convert-png
 Content-Type: application/json
 
 {
