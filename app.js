@@ -2,10 +2,9 @@ const express = require('express');
 const { phoneNumberFormatter } = require('./helpers/formatter');
 const http = require('http');
 const socketIO = require('socket.io');
+const bodyParser = require("body-parser");
 const cors = require('cors');
 const venom = require('venom-bot');
-
-
 const app = express();
 
 app.use(express.static(__dirname + '/'));
